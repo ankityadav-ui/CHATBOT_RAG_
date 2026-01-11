@@ -32,6 +32,17 @@ try:
         );
     """)
 
+    # FILES TABLE (stores uploaded file metadata linked to users)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS files (
+            id SERIAL PRIMARY KEY,
+            user_id INTEGER NOT NULL REFERENCES users(id),
+            filename TEXT NOT NULL,
+            filepath TEXT NOT NULL,
+            uploaded_at TIMESTAMP DEFAULT NOW()
+        );
+    """)
+
     conn.commit()
     cur.close()
     print("Tables created successfully.")

@@ -1,6 +1,7 @@
 import streamlit as st
 import requests
 
+# Ensure this matches your FastAPI port
 API_URL = "http://127.0.0.1:8000"
 
 st.set_page_config(page_title="RAG CHATBOT", layout="wide")
@@ -22,16 +23,19 @@ if st.session_state.user_id is None:
     if st.button("Login/Signup", key="login_button"):
         if username:
             try:
-                # Login/Signup Request
+                # 1. Login/Signup Request
                 res = requests.post(f"{API_URL}/get_or_create_user", json={"username": username})
                 res.raise_for_status()
                 data = res.json()
+                
                 st.session_state.user_id = data["user_id"]
                 st.session_state.username = data["username"]
                 
-                # Fetch Chat History
+                # 2. Fetch Chat History immediately after login
                 res_hist = requests.post(f"{API_URL}/get_history", json={"user_id": data["user_id"]})
-                st.session_state.messages = res_hist.json()["history"]
+                if res_hist.status_code == 200:
+                    st.session_state.messages = res_hist.json().get("history", [])
+                
                 st.rerun()
             except Exception as e:
                 st.error(f"Error connecting to backend: {e}")
@@ -43,10 +47,11 @@ else:
     # --- Sidebar: User Info and File Upload ---
     with st.sidebar:
         st.header(f"👤 {st.session_state.username}")
+        st.write(f"User ID: {st.session_state.user_id}")
         
         st.markdown("---")
         st.subheader("📁 Knowledge Base")
-        st.info("Upload new documents (PDF/TXT) to the chatbot's brain.")
+        st.info("Upload PDF, TXT, or DOCX to add to the chatbot's memory.")
         
         uploaded_file = st.file_uploader("Choose a file", type=["pdf", "txt", "docx"])
         
@@ -54,27 +59,41 @@ else:
             if uploaded_file:
                 with st.spinner("Processing file..."):
                     try:
+                        # Prepare the file for the multipart/form-data request
                         files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                        response = requests.post(f"{API_URL}/upload", files=files)
+                        # Include the logged-in username as a form field so backend receives it
+                        data = {"username": st.session_state.username}
+                        response = requests.post(f"{API_URL}/upload", files=files, data=data)
+                        
                         if response.status_code == 200:
                             st.success(f"Successfully indexed {uploaded_file.name}!")
                         else:
-                            st.error(f"Failed: {response.json().get('detail', 'Unknown error')}")
+                            # Try to show useful error information returned by backend
+                            try:
+                                err = response.json()
+                            except Exception:
+                                err = response.text
+                            # Prefer explicit fields if present
+                            msg = None
+                            if isinstance(err, dict):
+                                msg = err.get('detail') or err.get('error') or str(err)
+                            else:
+                                msg = str(err)
+                            st.error(f"Failed: {msg}")
                     except Exception as e:
-                        st.error(f"Error: {e}")
+                        st.error(f"Connection Error: {e}")
             else:
                 st.warning("Please select a file first.")
         
         st.markdown("---")
         if st.button("Logout", use_container_width=True):
-            st.session_state.user_id = None
-            st.session_state.username = None
-            st.session_state.messages = []
+            for key in list(st.session_state.keys()):
+                del st.session_state[key]
             st.rerun()
 
     # --- Chat Window ---
-    st.header("Chat Interface")
-    st.caption("Ask questions about your uploaded documents.")
+    st.header("Conversation")
+    st.caption("Ask questions based on your documents.")
 
     # Display History
     for chat in st.session_state.messages:
@@ -83,22 +102,25 @@ else:
 
     # Chat Input
     if prompt := st.chat_input("Ask me anything..."):
-        # Display Human message
+        # 1. Display Human message
         st.session_state.messages.append({"role": "human", "content": prompt})
         with st.chat_message("human"):
             st.markdown(prompt)
         
-        # Get AI response
+        # 2. Get AI response from backend
         with st.chat_message("ai"):
             with st.spinner("Thinking..."):
                 try:
-                    res = requests.post(
-                        f"{API_URL}/query", 
-                        json={"user_id": st.session_state.user_id, "text": prompt}
-                    )
+                    payload = {
+                        "user_id": st.session_state.user_id, 
+                        "text": prompt
+                    }
+                    res = requests.post(f"{API_URL}/query", json=payload)
                     res.raise_for_status()
-                    answer = res.json()["answer"]
+                    
+                    answer = res.json().get("answer", "I couldn't retrieve an answer.")
                     st.markdown(answer)
                     st.session_state.messages.append({"role": "ai", "content": answer})
+                    
                 except Exception as e:
-                    st.error(f"Error: {e}")
+                    st.error(f"Error fetching response: {e}")
