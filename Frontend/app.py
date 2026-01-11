@@ -112,8 +112,8 @@ else:
             with st.spinner("Thinking..."):
                 try:
                     payload = {
-                        "user_id": st.session_state.user_id, 
-                        "text": prompt
+                        "user_id": st.session_state.user_id,
+                        "query": prompt
                     }
                     res = requests.post(f"{API_URL}/query", json=payload)
                     res.raise_for_status()
